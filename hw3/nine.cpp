@@ -5,11 +5,11 @@
 
 const double PI = 3.14159265359;
 
-class NinePose {
-public:
+class NineTurtle {
+private:
 	turtlesim::Pose pose;
+public:
 	void PoseCallback(const turtlesim::Pose::ConstPtr& msg) {
-		//std::cout << "DEBUG: MESSAGE CALLBACK!!!!" << std::endl;
 		pose.x = msg->x;
 		pose.y = msg->y;
 		pose.theta = msg->theta;
@@ -19,72 +19,80 @@ public:
 	double getTheta() { return pose.theta; }
 };
 
-//Moves the turtle in the direction its facing at given speed by given distance
-//Uses the subscription to the turtle to determine its position and goal
-void move(NinePose& pose, ros::Publisher& pub, double speed, double distance) {
-	geometry_msgs::Twist velMsg;
-	velMsg.linear.x = speed;
-	velMsg.linear.y = 0;
-	velMsg.linear.z = 0;
-	velMsg.angular.x = 0;
-	velMsg.angular.y = 0;
-	velMsg.angular.z = 0;
-	double goal = pose.getX() + distance*cos(pose.getTheta());
-	ros::Rate rate(1); //turtlesim moves for 1 second when receiving a message
+double degrees2radians(int angle) {
+	return (PI*angle)/180.0;
+}
+
+//Moves the turtle in the direction its currently facing by distance
+//Goal-finds a tad bit to correct its path to the inital, immutable goal
+//To an error of 1%
+void move(NineTurtle& turtle, ros::Publisher& pub, double speed, double distance) {
+	geometry_msgs::Twist msg;
+	msg.linear.y = 0;
+	msg.linear.z = 0;
+	msg.angular.x = 0;
+	msg.angular.y = 0;
+	msg.angular.z = 0;
+	msg.linear.x = speed;
+	double goalX = turtle.getX() + distance*cos(turtle.getTheta());
+	double goalY = turtle.getY() + distance*sin(turtle.getTheta());
+	double distRemaining = sqrt(pow(turtle.getX() - goalX, 2) + pow(turtle.getY() - goalY, 2));
+	std::cout << "Moving from (X,Y) = (" << turtle.getX() << "," << turtle.getY() << ") to ("
+		<< goalX << "," << goalY << ")" << std::endl;
+	ros::Rate rate(10);
 	do {
-		pub.publish(velMsg);
+		//Slight angular adjustment/error-correction
+		msg.angular.z = 1 * (atan2(goalY - turtle.getY(), goalX - turtle.getX()) - turtle.getTheta());
+		pub.publish(msg);
 		ros::spinOnce();
 		rate.sleep();
-		//Fix overshooting
-		if(goal - pose.getX() > speed)
-			velMsg.linear.x = goal - pose.getX();
-	} while(ros::ok() && pose.getX() < goal);
-	velMsg.linear.x = 0;
-	pub.publish(velMsg);
-	ros::spinOnce();
+		distRemaining = sqrt(pow(turtle.getX() - goalX, 2) + pow(turtle.getY() - goalY, 2));
+		//If the turtle would overshoot, slow down its speed
+		if(fabs(distRemaining) < fabs(msg.linear.x))
+			msg.linear.x = distRemaining;
+		else if(fabs(distRemaining) >= fabs(speed))
+			msg.linear.x = speed;
+	} while(ros::ok() && distRemaining > 0.01);
+	msg.linear.x = 0;
+	msg.angular.z = 0;
+	pub.publish(msg);
+	rate.sleep();
+	std::cout << "Ended movement at (X,Y) = (" << turtle.getX() << "," << turtle.getY() << ")" << std::endl;
+}
+
+//Rotates the turtle by the desired amount in the desired direction
+//Will correct for over or under-rotating to an error of 0.1%
+void rotate(NineTurtle& turtle, ros::Publisher& pub, double speed, double angle, bool clockwise=false) {
+	geometry_msgs::Twist msg;
+	msg.linear.x = 0;
+	msg.linear.y = 0;
+	msg.linear.z = 0;
+	msg.angular.x = 0;
+	msg.angular.y = 0;
+	msg.angular.z = clockwise ? -fabs(speed) : fabs(speed);
+	//double goalTheta = clockwise ? turtle.getTheta() - angle : turtle.getTheta() + angle;
+	double goalTheta = turtle.getTheta() + angle;
+	if(goalTheta > 2*PI) goalTheta = goalTheta - 2*PI;
+	if(goalTheta < -2*PI) goalTheta = goalTheta + 2*PI;
+	std::cout << "DEBUG: TurtleTheta=" << turtle.getTheta() << "; angle=" << angle << (clockwise ? " clockwise" : " counter-clockwise");
+	std::cout << "; goalTheta=" << goalTheta << std::endl;
+	ros::Rate rate(10);
+	do {
+		pub.publish(msg);
+		ros::spinOnce();
+		rate.sleep();
+		//Fix missing the goal by slowing down the speed and maybe fixing the direction of rotation
+		if(fabs(goalTheta - turtle.getTheta()) < fabs(msg.angular.z))
+			msg.angular.z = (goalTheta - turtle.getTheta());
+	} while(ros::ok() && fabs(turtle.getTheta() - goalTheta) > 0.001);
+	msg.angular.z = 0;
+	pub.publish(msg);
 	rate.sleep();
 }
 
-//Rotates the turtle by the given relative amount
-//Uses the subscription to the turtle
-void rotate(ros::Publisher& pub, double speed, double angle, bool clockwise) {
-	geometry_msgs::Twist velMsg;
-	velMsg.linear.x = 0;
-	velMsg.linear.y = 0;
-	velMsg.linear.z = 0;
-	velMsg.angular.x = 0;
-	velMsg.angular.y = 0;
-	velMsg.angular.z = clockwise ? -fabs(speed) : fabs(speed);
-	double t0 = ros::Time::now().toSec(), t1;
-	double angleRotated = 0.0;
-	//ros::Rate rate(100);
-	while(ros::ok() && angleRotated < angle) {
-		pub.publish(velMsg);
-		ros::spinOnce();
-		t1 = ros::Time::now().toSec();
-		angleRotated = speed * (t1-t0);
-		/*if(abs(speed) > abs(angle-angleRotated)) {
-			speed = angle-angleRotated;
-			velMsg.angular.z = clockwise ? -abs(speed) : abs(speed);
-		}*/
-	}
-	velMsg.angular.z = 0;
-	pub.publish(velMsg);
-	ros::spinOnce();
-	//rate.sleep();
-}
-
-//Code from Intro to ROS pdf
-double degrees2radians(double angle_in_degrees)
-{
-	return angle_in_degrees*PI /180.0;
-}
-
-//Slightly modified code from Intro to ROS pdf
-void setDesiredOrientation (NinePose& pose, ros::Publisher& pub, double desired_angle_radians) {
-	double relative_angle_radians = desired_angle_radians - pose.getTheta();
-	bool clockwise = ((relative_angle_radians<0)?true:false);
-	rotate(pub, degrees2radians(10), abs(relative_angle_radians), clockwise);
+void setDesiredOrientation(NineTurtle& turtle, ros::Publisher& pub, double angle) {
+	bool clockwise = (angle-turtle.getTheta()) < 0 ? true: false;
+	rotate (turtle, pub, degrees2radians(45), fabs(angle-turtle.getTheta()), clockwise);
 }
 
 using namespace std;
@@ -93,38 +101,36 @@ int main(int argc, char* argv[]) {
 	ros::init(argc, argv, "nine");
 	ros::NodeHandle nh;
 	ros::Publisher pub = nh.advertise<geometry_msgs::Twist>("/turtle1/cmd_vel", 1000);
-	NinePose pose;
-	ros::Subscriber sub = nh.subscribe("/turtle1/pose", 10, &NinePose::PoseCallback, &pose);
+	NineTurtle myTurtle;
+	ros::Subscriber sub = nh.subscribe("/turtle1/pose", 10, &NineTurtle::PoseCallback, &myTurtle);
 	ros::spinOnce();
+	geometry_msgs::Twist msg;
+	ros::Rate rate(10);
+	double t0;
 	while(ros::ok()) {
-		cout << "DEBUG: TURNING 180 deg...\n";
-		rotate(pub, degrees2radians(40), degrees2radians(180), false);
-		cout << "DEBUG: MOVING 5...\n";
-		move(pose, pub, 0.5, 5);
-		cout << "DEBUG: ROTATING 20 deg...\n";
-		rotate(pub, degrees2radians(5), degrees2radians(20), true);
-		//Code to specifically draw almost a full circle:
-		//Strategy: check the turtle's current X and Y, and move+rotate until the X ends up the same but the Y is lower
-		cout << "DEBUG: STARTING CIRCLE...\n";
-		geometry_msgs::Twist vel_msg;
-		vel_msg.linear.x = 0.5;
-		vel_msg.linear.y = 0;
-		vel_msg.linear.z = 0;
-		vel_msg.angular.z = 0.5;
-		vel_msg.angular.x = 0;
-		vel_msg.angular.y = 0;
-		ros::Rate circleRate = 100;
-		double currX = pose.getX();
-		double currY = pose.getY();
-		while(ros::ok() && ((pose.getX() <= currX - 1 && pose.getX() >= currX + 1) || pose.getY() <= currY)) {
-			pub.publish(vel_msg);
+		setDesiredOrientation(myTurtle, pub, degrees2radians(90));
+		move(myTurtle, pub, 0.5, 3);
+		rotate(myTurtle, pub, degrees2radians(45), degrees2radians(45));
+		move(myTurtle, pub, 0.5, 0.7);
+		//Move the turtle in a semi circle
+		//Strategy: 360 degrees at a speed of 20 deg/sec means ~18 seconds of movement
+		msg.linear.x = 0.25; //Adjust until circle is desired size
+		msg.linear.y = 0;
+		msg.linear.z = 0;
+		msg.angular.x = 0;
+		msg.angular.y = 0;
+		msg.angular.z = degrees2radians(20);
+		t0 = ros::Time::now().toSec();
+		do {
+			pub.publish(msg);
 			ros::spinOnce();
-			circleRate.sleep();
-		}
-		vel_msg.angular.z = 0;
-		vel_msg.linear.x = 0;
-		pub.publish(vel_msg);
+			rate.sleep();
+		} while(ros::ok() && ros::Time::now().toSec() - t0 < 18);
+		msg.angular.z = 0;
+		msg.linear.x = 0;
+		pub.publish(msg);
 		ros::spinOnce();
+		rate.sleep();
 		break;
 	}
 	return 0;
