@@ -113,19 +113,4 @@ int main(int argc, char **argv) {
 	rotate(degrees2radians(angular_speed), degrees2radians(angle), clockwise);
 	distance = 1;
 	move(speed, distance, isForward);
-	
-	/*setDesiredOrientation(degrees2radians(-60));
-	loop_rate.sleep();
-	setDesiredOrientation(degrees2radians(-60));
-	turtlesim::Pose pose;
-	pose.x = 1;
-	pose.y = 1;
-	pose.theta = 0;
-	moveGoal(pose, 0.01);
-	loop_rate.sleep();
-	gridClean();
-	loop_rate.sleep();
-	spiralClean();
-	ros::spin();
-	return 0;*/
 }
